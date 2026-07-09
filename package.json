@@ -1,0 +1,15 @@
+{
+  "name": "seizure-tracker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A private, on-device seizure tracker for logging absence/focal-aware seizure episodes, with CSV, printable-PDF, and Google Drive spreadsheet export.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}
