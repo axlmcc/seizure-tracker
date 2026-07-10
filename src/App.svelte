@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import Log from './components/Log.svelte'
   import Add from './components/Add.svelte'
+  import LogMeds from './components/LogMeds.svelte'
   import SeizureForm from './components/SeizureForm.svelte'
   import MedEventForm from './components/MedEventForm.svelte'
   import MedList from './components/MedList.svelte'
@@ -24,7 +25,7 @@
 
   const TITLES = {
     '': 'Seizure Tracker', add: 'Add', new: 'Log a seizure', episode: 'Seizure',
-    'med-event': 'Medication', meds: 'Medications', med: 'Medication',
+    'log-med': 'Log medications', 'med-event': 'As-needed dose', meds: 'Medications', med: 'Medication',
     batches: 'Batches', 'log-batch': 'Log batch', insights: 'Insights', settings: 'Settings & export',
   }
   const title = $derived(TITLES[seg] ?? 'Seizure Tracker')
@@ -37,7 +38,7 @@
   }
   const tabs = [
     { href: '#/', label: 'Log', d: icons.log, match: (s) => !s || s === 'episode' },
-    { href: '#/add', label: 'Add', d: icons.add, match: (s) => ['add', 'new', 'med-event', 'meds', 'med', 'batches', 'log-batch'].includes(s) },
+    { href: '#/add', label: 'Add', d: icons.add, match: (s) => ['add', 'new', 'log-med', 'med-event', 'meds', 'med', 'batches', 'log-batch'].includes(s) },
     { href: '#/insights', label: 'Insights', d: icons.insights, match: (s) => s === 'insights' },
     { href: '#/settings', label: 'Settings', d: icons.settings, match: (s) => s === 'settings' },
   ]
@@ -53,6 +54,8 @@
     <Log />
   {:else if seg === 'add'}
     <Add />
+  {:else if seg === 'log-med'}
+    <LogMeds />
   {:else if seg === 'new'}
     <SeizureForm />
   {:else if seg === 'episode'}

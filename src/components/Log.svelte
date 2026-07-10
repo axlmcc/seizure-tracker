@@ -13,7 +13,7 @@
 <main class="stack">
   <div class="row">
     <a class="btn btn-primary btn-lg" href="#/new" style="flex:1">＋ Seizure</a>
-    <a class="btn btn-lg" href="#/med-event/new" style="flex:1">💊 Medication</a>
+    <a class="btn btn-lg" href="#/log-med" style="flex:1">💊 Medication</a>
   </div>
 
   {#if items.length === 0}
