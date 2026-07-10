@@ -18,13 +18,22 @@ warning signs, recovery, and possible triggers over time.
 
 ## What it tracks
 
-Each episode records: date & time, duration, awareness level, a 1–5 severity, and
+**Seizure episodes** — date & time, duration, awareness level, a 1–5 severity, and
 checklists (with free-text "other") for symptoms **during**, **warning signs before**,
 **recovery after**, and **possible triggers** — plus activity beforehand, who witnessed
-it, any injury, and free-form notes.
+it, any injury, and free-form notes. The checklists are tuned for absence /
+focal-aware-impaired seizures, but every list has an "Other symptoms" box so nothing
+is off-limits.
 
-The checklists are tuned for absence / focal-aware-impaired seizures, but every list
-has an "Other symptoms" box so nothing is off-limits.
+**Medications** — keep a regimen list (name, dose, frequency, start date,
+active/stopped) in Settings, then log each dose taken or skipped as its own event. The
+Log tab shows a single, time-sorted timeline of seizures and medication events
+together.
+
+**Insights** — summary stats plus a 12-week "seizures per week" bar chart with vertical
+markers for when each medication was started, to help eyeball whether seizure frequency
+tracks a medication change. (A visible pattern is a question to ask a doctor, not a
+conclusion.)
 
 ## Run it locally
 
