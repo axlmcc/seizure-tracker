@@ -133,8 +133,19 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .episode .tags { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
 .pill { font-size: 12px; background: var(--surface-2); border-radius: 999px; padding: 3px 9px; color: var(--muted); }
 
+.episode.seizure { border-left: 4px solid var(--primary); }
+.episode.med { border-left: 4px solid var(--accent); }
+.episode .when .pill { margin-left: 6px; vertical-align: middle; }
+
 .empty { text-align: center; color: var(--muted); padding: 40px 20px; }
 .empty .big { font-size: 44px; margin-bottom: 6px; }
+
+/* ---- Timeline chart ---- */
+.chart { width: 100%; height: auto; display: block; }
+.legend { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.legend .item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.legend .item strong { color: var(--text); }
+.legend .sw { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; }
 
 /* ---- Stats ---- */
 .stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }

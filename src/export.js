@@ -1,7 +1,7 @@
 // Export helpers: CSV (for spreadsheets), a printable report (Save-as-PDF via
 // the browser print dialog), and small download utilities.
 
-import { formatDuration, formatDateTime } from './model.js'
+import { formatDuration, formatDateTime, formatDate } from './model.js'
 
 // Column order for the spreadsheet. Kept flat and doctor-friendly.
 const COLUMNS = [
@@ -65,7 +65,19 @@ function esc(s) {
 
 // Opens a clean, print-optimised report in a new window and invokes print().
 // The user picks "Save as PDF" as the destination — no PDF library needed.
-export function printReport(episodes) {
+export function printReport(episodes, medications = []) {
+  const meds = medications
+    .map((m) => {
+      const bits = [m.dose, m.frequency].filter(Boolean).join(', ')
+      const started = m.startedAt ? `started ${esc(formatDate(m.startedAt))}` : ''
+      const status = m.active ? '' : ' (stopped)'
+      return `<tr><td class="k">${esc(m.name)}${status}</td><td>${esc(bits)}${bits && started ? ' · ' : ''}${started}</td></tr>`
+    })
+    .join('')
+  const medsSection = medications.length
+    ? `<div class="ep"><div class="ep-head"><strong>Medications</strong></div><table>${meds}</table></div>`
+    : ''
+
   const rows = episodes
     .map((e) => {
       const symptoms = [...e.during, ...e.customSymptoms]
@@ -106,6 +118,7 @@ export function printReport(episodes) {
   </style></head><body>
     <h1>Seizure Log</h1>
     <p class="sub">${episodes.length} episode${episodes.length === 1 ? '' : 's'} · generated ${esc(new Date().toLocaleDateString())}</p>
+    ${medsSection}
     ${rows || '<p>No episodes recorded yet.</p>'}
     <p class="disclaimer">This log is self-reported and intended to support a conversation with a qualified medical professional. It is not a diagnosis.</p>
   </body></html>`

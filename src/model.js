@@ -138,3 +138,64 @@ export function formatDateTime(occurredAt) {
     minute: '2-digit',
   })
 }
+
+// Friendly date-only from a yyyy-mm-dd string (or any parseable date).
+export function formatDate(value) {
+  if (!value) return '—'
+  // Parse yyyy-mm-dd as local (not UTC) to avoid off-by-one-day surprises.
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(value)
+  if (isNaN(d)) return value
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+// --- Medications ------------------------------------------------------------
+
+// Common dosing schedules offered as autocomplete suggestions (free text still allowed).
+export const MED_FREQUENCIES = [
+  'Once daily',
+  'Twice daily',
+  'Three times daily',
+  'Every morning',
+  'Every night',
+  'As needed',
+]
+
+export function todayLocalDate() {
+  const d = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+// A medication in her regimen (managed in Settings). This is the "list" that
+// medication-taken events reference.
+export function createMedication(overrides = {}) {
+  return {
+    id: newId(),
+    name: '',
+    dose: '', // e.g. "50 mg"
+    frequency: '', // free text, with MED_FREQUENCIES as suggestions
+    startedAt: todayLocalDate(), // date this med was started — key for correlation
+    active: true, // false = stopped taking it (kept for history)
+    notes: '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+// A logged "I took (or skipped) a dose" event. Snapshots name/dose so the log
+// stays accurate even if the medication is later edited or removed.
+export function createMedEvent(overrides = {}) {
+  return {
+    id: newId(),
+    medicationId: '',
+    medicationName: '',
+    dose: '',
+    takenAt: nowLocalInput(),
+    skipped: false, // true = a missed / skipped dose
+    notes: '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  }
+}

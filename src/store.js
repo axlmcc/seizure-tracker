@@ -9,6 +9,8 @@ const KEY = 'seizure-tracker:v1'
 
 const defaultState = () => ({
   episodes: [],
+  medications: [], // her current/past medication regimen (the "list")
+  medEvents: [], // logged doses taken/skipped
   settings: {
     // Google Drive file id of the living spreadsheet, once one is created.
     driveFileId: null,
@@ -86,23 +88,91 @@ export function updateSettings(patch) {
   persist()
 }
 
+// --- Medications (the regimen list) -----------------------------------------
+
+// Active first, then alphabetical.
+export function getMedications() {
+  return [...state.medications].sort((a, b) => {
+    if (a.active !== b.active) return a.active ? -1 : 1
+    return (a.name || '').localeCompare(b.name || '')
+  })
+}
+
+export function getActiveMedications() {
+  return getMedications().filter((m) => m.active)
+}
+
+export function getMedication(id) {
+  return state.medications.find((m) => m.id === id) || null
+}
+
+export function upsertMedication(med) {
+  const idx = state.medications.findIndex((m) => m.id === med.id)
+  const stamped = { ...med, updatedAt: new Date().toISOString() }
+  if (idx >= 0) state.medications[idx] = stamped
+  else state.medications.push(stamped)
+  persist()
+  return stamped
+}
+
+export function deleteMedication(id) {
+  state.medications = state.medications.filter((m) => m.id !== id)
+  persist()
+}
+
+// --- Medication events (doses taken / skipped) ------------------------------
+
+export function getMedEvents() {
+  return [...state.medEvents].sort((a, b) => new Date(b.takenAt) - new Date(a.takenAt))
+}
+
+export function getMedEvent(id) {
+  return state.medEvents.find((m) => m.id === id) || null
+}
+
+export function upsertMedEvent(event) {
+  const idx = state.medEvents.findIndex((m) => m.id === event.id)
+  const stamped = { ...event, updatedAt: new Date().toISOString() }
+  if (idx >= 0) state.medEvents[idx] = stamped
+  else state.medEvents.push(stamped)
+  persist()
+  return stamped
+}
+
+export function deleteMedEvent(id) {
+  state.medEvents = state.medEvents.filter((m) => m.id !== id)
+  persist()
+}
+
+// Merged, newest-first timeline of both seizures and medication events.
+// Each item is { kind: 'seizure' | 'med', when: <iso/local string>, data }.
+export function getTimeline() {
+  const seizures = state.episodes.map((e) => ({ kind: 'seizure', when: e.occurredAt, data: e }))
+  const meds = state.medEvents.map((m) => ({ kind: 'med', when: m.takenAt, data: m }))
+  return [...seizures, ...meds].sort((a, b) => new Date(b.when) - new Date(a.when))
+}
+
 // --- Backup / restore (full JSON) -------------------------------------------
 
 export function exportJSON() {
   return JSON.stringify(state, null, 2)
 }
 
-// Merges imported episodes by id (imported wins on conflict). Returns count added/updated.
+// Merges imported records by id (imported wins on conflict) across all
+// collections. Returns the number of episodes in the imported file.
 export function importJSON(json) {
   const incoming = JSON.parse(json)
   if (!incoming || !Array.isArray(incoming.episodes)) {
     throw new Error('This file does not look like a Seizure Tracker backup.')
   }
-  const byId = new Map(state.episodes.map((e) => [e.id, e]))
-  for (const e of incoming.episodes) {
-    if (e && e.id) byId.set(e.id, e)
+  const mergeById = (current, imported) => {
+    const byId = new Map(current.map((x) => [x.id, x]))
+    for (const x of imported || []) if (x && x.id) byId.set(x.id, x)
+    return [...byId.values()]
   }
-  state.episodes = [...byId.values()]
+  state.episodes = mergeById(state.episodes, incoming.episodes)
+  state.medications = mergeById(state.medications, incoming.medications)
+  state.medEvents = mergeById(state.medEvents, incoming.medEvents)
   persist()
   return incoming.episodes.length
 }

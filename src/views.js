@@ -1,13 +1,16 @@
-// View builders. Each returns { html, mount(root) }.
+// View builders. Each returns { html, mount(root, navigate, rerender) }.
 // mount() wires up event handlers after the html is inserted into the DOM.
 
 import {
   DURING_SYMPTOMS, BEFORE_SYMPTOMS, AFTER_SYMPTOMS, TRIGGERS,
-  AWARENESS_LEVELS, DURATION_PRESETS,
-  createEpisode, formatDuration, formatDateTime,
+  AWARENESS_LEVELS, DURATION_PRESETS, MED_FREQUENCIES,
+  createEpisode, createMedication, createMedEvent,
+  formatDuration, formatDateTime, formatDate,
 } from './model.js'
 import {
   getEpisodes, getEpisode, upsertEpisode, deleteEpisode,
+  getMedications, getActiveMedications, getMedication, upsertMedication, deleteMedication,
+  getMedEvent, upsertMedEvent, deleteMedEvent, getTimeline,
   getSettings, exportJSON, importJSON,
 } from './store.js'
 import { toCSV, downloadFile, printReport, dateStamp } from './export.js'
@@ -25,38 +28,66 @@ function chipList(group, options, selected) {
 }
 
 // ===========================================================================
-// LOG (list of episodes)
+// LOG (merged timeline of seizures + medication events)
 // ===========================================================================
 export function LogView() {
-  const episodes = getEpisodes()
+  const items = getTimeline()
 
-  const list = episodes.length
-    ? episodes.map((e) => {
-        const symptoms = [...e.during, ...e.customSymptoms].slice(0, 3)
-        const extra = e.during.length + e.customSymptoms.length - symptoms.length
-        return `<a class="card episode" href="#/episode/${e.id}">
-          <div class="when">${esc(formatDateTime(e.occurredAt))}</div>
-          <div class="meta">${esc(formatDuration(e.durationSeconds))}${e.awareness ? ' · ' + esc(e.awareness) : ''}${e.severity ? ' · severity ' + e.severity + '/5' : ''}</div>
-          ${symptoms.length ? `<div class="tags">${symptoms.map((s) => `<span class="pill">${esc(s)}</span>`).join('')}${extra > 0 ? `<span class="pill">+${extra} more</span>` : ''}</div>` : ''}
-        </a>`
-      }).join('')
-    : `<div class="empty"><div class="big">🗓️</div><p>No episodes logged yet.<br>Tap <strong>Log an episode</strong> when something happens.</p></div>`
+  const list = items.length
+    ? items.map((item) => (item.kind === 'seizure' ? seizureCard(item.data) : medCard(item.data))).join('')
+    : `<div class="empty"><div class="big">🗓️</div><p>Nothing logged yet.<br>Tap <strong>Seizure</strong> or <strong>Medication</strong> above when something happens.</p></div>`
 
   const html = `<main class="stack">
-    <a class="btn btn-primary btn-lg btn-block" href="#/new">＋ Log an episode</a>
+    <div class="row">
+      <a class="btn btn-primary btn-lg" href="#/new" style="flex:1">＋ Seizure</a>
+      <a class="btn btn-lg" href="#/med-event/new" style="flex:1">💊 Medication</a>
+    </div>
     ${list}
-    <p class="disclaimer">Your data stays on this device. It's a private record to share with a doctor — not a diagnosis.</p>
+    <p class="disclaimer">Everything stays on this device. A private record to share with a doctor — not a diagnosis.</p>
   </main>`
 
   return { html, mount() {} }
 }
 
+function seizureCard(e) {
+  const symptoms = [...e.during, ...e.customSymptoms].slice(0, 3)
+  const extra = e.during.length + e.customSymptoms.length - symptoms.length
+  return `<a class="card episode seizure" href="#/episode/${e.id}">
+    <div class="when">${esc(formatDateTime(e.occurredAt))}</div>
+    <div class="meta">${esc(formatDuration(e.durationSeconds))}${e.awareness ? ' · ' + esc(e.awareness) : ''}${e.severity ? ' · severity ' + e.severity + '/5' : ''}</div>
+    ${symptoms.length ? `<div class="tags">${symptoms.map((s) => `<span class="pill">${esc(s)}</span>`).join('')}${extra > 0 ? `<span class="pill">+${extra} more</span>` : ''}</div>` : ''}
+  </a>`
+}
+
+function medCard(m) {
+  return `<a class="card episode med" href="#/med-event/${m.id}">
+    <div class="when">💊 ${esc(m.medicationName || 'Medication')}${m.skipped ? ' — skipped' : ''}</div>
+    <div class="meta">${esc(formatDateTime(m.takenAt))}${m.dose ? ' · ' + esc(m.dose) : ''}</div>
+    ${m.notes ? `<div class="tags"><span class="pill">${esc(m.notes)}</span></div>` : ''}
+  </a>`
+}
+
 // ===========================================================================
-// FORM (new / edit an episode)
+// ADD (chooser: what do you want to log?)
+// ===========================================================================
+export function AddChooserView() {
+  const html = `<main class="stack">
+    <a class="btn btn-primary btn-lg btn-block" href="#/new">＋ Log a seizure</a>
+    <a class="btn btn-lg btn-block" href="#/med-event/new">💊 Log medication taken</a>
+    <div class="card stack">
+      <h2>Medication list</h2>
+      <p class="muted" style="margin:0; font-size:13px">Keep the list of medications up to date so it's ready to pick when logging a dose.</p>
+      <a class="btn btn-block" href="#/meds">Manage medications</a>
+    </div>
+  </main>`
+  return { html, mount() {} }
+}
+
+// ===========================================================================
+// SEIZURE FORM (new / edit)
 // ===========================================================================
 export function FormView(id) {
   const existing = id ? getEpisode(id) : null
-  // Work on a copy so cancelling discards changes.
   const draft = existing ? JSON.parse(JSON.stringify(existing)) : createEpisode()
 
   const html = `<main class="stack">
@@ -151,7 +182,6 @@ export function FormView(id) {
   </main>`
 
   function mount(root, navigate) {
-    // Custom symptom tags.
     const customList = root.querySelector('#customList')
     function renderCustom() {
       customList.innerHTML = draft.customSymptoms
@@ -177,14 +207,12 @@ export function FormView(id) {
     root.querySelector('#customAdd').addEventListener('click', addCustom)
     customInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addCustom() } })
 
-    // Chip checklists.
     root.querySelectorAll('.chips').forEach((group) => {
       const key = group.dataset.group
       group.addEventListener('change', (e) => {
         const input = e.target.closest('input[type="checkbox"]')
         if (!input) return
-        const label = input.closest('.chip')
-        label.classList.toggle('on', input.checked)
+        input.closest('.chip').classList.toggle('on', input.checked)
         const val = input.value
         if (input.checked) {
           if (!draft[key].includes(val)) draft[key].push(val)
@@ -194,7 +222,6 @@ export function FormView(id) {
       })
     })
 
-    // Duration presets + custom.
     const durationCustom = root.querySelector('#durationCustom')
     root.querySelectorAll('.preset').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -215,10 +242,8 @@ export function FormView(id) {
       draft.durationSeconds = durationCustom.value === '' ? null : Number(durationCustom.value)
     })
 
-    // Awareness.
     root.querySelector('#awareness').addEventListener('change', (e) => { draft.awareness = e.target.value })
 
-    // Severity.
     root.querySelectorAll('.sev-dot').forEach((btn) => {
       btn.addEventListener('click', () => {
         const n = Number(btn.dataset.sev)
@@ -227,14 +252,12 @@ export function FormView(id) {
       })
     })
 
-    // Text fields.
     const bind = (sel, key) => root.querySelector(sel).addEventListener('input', (e) => { draft[key] = e.target.value })
     bind('#activityBefore', 'activityBefore')
     bind('#witnessedBy', 'witnessedBy')
     bind('#notes', 'notes')
     bind('#injuryNote', 'injuryNote')
 
-    // Injury toggle.
     const injury = root.querySelector('#injury')
     const injuryNote = root.querySelector('#injuryNote')
     injury.addEventListener('change', () => {
@@ -243,17 +266,14 @@ export function FormView(id) {
       injuryNote.classList.toggle('hidden', !injury.checked)
     })
 
-    // occurredAt.
     root.querySelector('#occurredAt').addEventListener('input', (e) => { draft.occurredAt = e.target.value })
 
-    // Save.
     root.querySelector('#save').addEventListener('click', () => {
       if (!draft.occurredAt) { alert('Please set when it happened.'); return }
       upsertEpisode(draft)
       navigate('#/')
     })
 
-    // Delete.
     const del = root.querySelector('#delete')
     if (del) {
       del.addEventListener('click', () => {
@@ -269,24 +289,229 @@ export function FormView(id) {
 }
 
 // ===========================================================================
-// INSIGHTS (basic stats to help spot patterns)
+// MEDICATION EVENT FORM (log a dose taken / skipped)
+// ===========================================================================
+export function MedEventFormView(id) {
+  const existing = id ? getMedEvent(id) : null
+  const activeMeds = getActiveMedications()
+
+  // Can't log a dose with no medications on file yet.
+  if (!existing && activeMeds.length === 0) {
+    const html = `<main><div class="card stack">
+      <h2>No medications yet</h2>
+      <p class="muted" style="margin:0; font-size:13px">Add the medications she's taking first, then you can log when she takes them.</p>
+      <a class="btn btn-primary btn-block" href="#/med/new">Add a medication</a>
+      <a class="btn btn-block" href="#/">Cancel</a>
+    </div></main>`
+    return { html, mount() {} }
+  }
+
+  const draft = existing ? { ...existing } : createMedEvent()
+
+  // Build the pick list. When editing, make sure the event's own medication is
+  // selectable even if it's since been stopped or deleted.
+  const optionMeds = [...activeMeds]
+  if (draft.medicationId && !optionMeds.some((m) => m.id === draft.medicationId)) {
+    optionMeds.push({ id: draft.medicationId, name: draft.medicationName || 'Medication', dose: draft.dose })
+  }
+  // Default a new event to the first medication.
+  if (!existing && optionMeds.length) {
+    draft.medicationId = optionMeds[0].id
+    draft.medicationName = optionMeds[0].name
+    if (!draft.dose) draft.dose = optionMeds[0].dose || ''
+  }
+
+  const html = `<main class="stack">
+    <div class="card stack">
+      <div>
+        <label class="field" for="medSelect">Which medication?</label>
+        <select id="medSelect">
+          ${optionMeds.map((m) => `<option value="${m.id}" data-name="${esc(m.name)}" data-dose="${esc(m.dose || '')}" ${draft.medicationId === m.id ? 'selected' : ''}>${esc(m.name)}${m.dose ? ` (${esc(m.dose)})` : ''}</option>`).join('')}
+        </select>
+        <a href="#/meds" class="muted" style="display:inline-block; margin-top:8px; font-size:13px">Manage medication list →</a>
+      </div>
+      <div>
+        <label class="field" for="takenAt">When?</label>
+        <input type="datetime-local" id="takenAt" value="${esc(draft.takenAt)}">
+      </div>
+      <div>
+        <label class="field" for="dose">Dose</label>
+        <input type="text" id="dose" value="${esc(draft.dose)}" placeholder="e.g. 50 mg">
+      </div>
+      <div>
+        <label class="chip ${draft.skipped ? 'on' : ''}" id="skippedChip" style="width:fit-content">
+          <input type="checkbox" id="skipped" ${draft.skipped ? 'checked' : ''}>${tick}<span>This dose was missed / skipped</span>
+        </label>
+      </div>
+      <div>
+        <label class="field" for="medNotes">Notes</label>
+        <textarea id="medNotes" placeholder="Anything worth noting…">${esc(draft.notes)}</textarea>
+      </div>
+    </div>
+
+    <button type="button" id="save" class="btn-primary btn-lg btn-block">${existing ? 'Save changes' : 'Save'}</button>
+    <a class="btn btn-block" href="#/">Cancel</a>
+    ${existing ? '<button type="button" id="delete" class="btn-danger btn-block">Delete this entry</button>' : ''}
+  </main>`
+
+  function mount(root, navigate) {
+    const select = root.querySelector('#medSelect')
+    const dose = root.querySelector('#dose')
+    select.addEventListener('change', () => {
+      const opt = select.selectedOptions[0]
+      draft.medicationId = select.value
+      draft.medicationName = opt?.dataset.name || ''
+      // Prefill dose from the chosen medication (user can still edit).
+      dose.value = opt?.dataset.dose || ''
+      draft.dose = dose.value
+    })
+    dose.addEventListener('input', () => { draft.dose = dose.value })
+    root.querySelector('#takenAt').addEventListener('input', (e) => { draft.takenAt = e.target.value })
+    root.querySelector('#medNotes').addEventListener('input', (e) => { draft.notes = e.target.value })
+
+    const skipped = root.querySelector('#skipped')
+    skipped.addEventListener('change', () => {
+      draft.skipped = skipped.checked
+      root.querySelector('#skippedChip').classList.toggle('on', skipped.checked)
+    })
+
+    root.querySelector('#save').addEventListener('click', () => {
+      if (!draft.medicationId) { alert('Please choose a medication.'); return }
+      if (!draft.takenAt) { alert('Please set when it was taken.'); return }
+      upsertMedEvent(draft)
+      navigate('#/')
+    })
+
+    const del = root.querySelector('#delete')
+    if (del) {
+      del.addEventListener('click', () => {
+        if (confirm('Delete this entry? This cannot be undone.')) {
+          deleteMedEvent(existing.id)
+          navigate('#/')
+        }
+      })
+    }
+  }
+
+  return { html, mount }
+}
+
+// ===========================================================================
+// MEDICATION LIST (manage the regimen)
+// ===========================================================================
+export function MedListView() {
+  const meds = getMedications()
+
+  const list = meds.length
+    ? meds.map((m) => `<a class="card episode med" href="#/med/${m.id}">
+        <div class="when">${esc(m.name)}${m.active ? '' : ' <span class="pill">stopped</span>'}</div>
+        <div class="meta">${[m.dose, m.frequency].filter(Boolean).map(esc).join(' · ') || '—'}${m.startedAt ? ' · since ' + esc(formatDate(m.startedAt)) : ''}</div>
+      </a>`).join('')
+    : `<div class="empty"><div class="big">💊</div><p>No medications added yet.</p></div>`
+
+  const html = `<main class="stack">
+    <a class="btn btn-primary btn-lg btn-block" href="#/med/new">＋ Add a medication</a>
+    ${list}
+    <a class="btn btn-block" href="#/settings">Back to settings</a>
+  </main>`
+
+  return { html, mount() {} }
+}
+
+// ===========================================================================
+// MEDICATION FORM (add / edit a medication)
+// ===========================================================================
+export function MedFormView(id) {
+  const existing = id ? getMedication(id) : null
+  const draft = existing ? { ...existing } : createMedication()
+
+  const html = `<main class="stack">
+    <div class="card stack">
+      <div>
+        <label class="field" for="name">Medication name</label>
+        <input type="text" id="name" value="${esc(draft.name)}" placeholder="e.g. Lamotrigine" autocomplete="off">
+      </div>
+      <div>
+        <label class="field" for="mdose">Dose</label>
+        <input type="text" id="mdose" value="${esc(draft.dose)}" placeholder="e.g. 50 mg">
+      </div>
+      <div>
+        <label class="field" for="frequency">How often</label>
+        <input type="text" id="frequency" list="freqOptions" value="${esc(draft.frequency)}" placeholder="e.g. Twice daily">
+        <datalist id="freqOptions">${MED_FREQUENCIES.map((f) => `<option value="${esc(f)}">`).join('')}</datalist>
+      </div>
+      <div>
+        <label class="field" for="startedAt">Started taking it on</label>
+        <input type="date" id="startedAt" value="${esc(draft.startedAt)}">
+        <p class="muted" style="margin:6px 0 0; font-size:13px">Used to line up new medications with seizure timing on the Insights page.</p>
+      </div>
+      <div>
+        <label class="chip ${draft.active ? 'on' : ''}" id="activeChip" style="width:fit-content">
+          <input type="checkbox" id="active" ${draft.active ? 'checked' : ''}>${tick}<span>Currently taking this</span>
+        </label>
+        <p class="muted" style="margin:6px 0 0; font-size:13px">Turn off if she's stopped — it stays in the history but won't show when logging new doses.</p>
+      </div>
+      <div>
+        <label class="field" for="mnotes">Notes</label>
+        <textarea id="mnotes" placeholder="Prescriber, reason, side effects…">${esc(draft.notes)}</textarea>
+      </div>
+    </div>
+
+    <button type="button" id="save" class="btn-primary btn-lg btn-block">${existing ? 'Save changes' : 'Add medication'}</button>
+    <a class="btn btn-block" href="#/meds">Cancel</a>
+    ${existing ? '<button type="button" id="delete" class="btn-danger btn-block">Delete medication</button>' : ''}
+  </main>`
+
+  function mount(root, navigate) {
+    const bind = (sel, key) => root.querySelector(sel).addEventListener('input', (e) => { draft[key] = e.target.value })
+    bind('#name', 'name')
+    bind('#mdose', 'dose')
+    bind('#frequency', 'frequency')
+    bind('#startedAt', 'startedAt')
+    bind('#mnotes', 'notes')
+
+    const active = root.querySelector('#active')
+    active.addEventListener('change', () => {
+      draft.active = active.checked
+      root.querySelector('#activeChip').classList.toggle('on', active.checked)
+    })
+
+    root.querySelector('#save').addEventListener('click', () => {
+      if (!draft.name.trim()) { alert('Please enter the medication name.'); return }
+      upsertMedication(draft)
+      navigate('#/meds')
+    })
+
+    const del = root.querySelector('#delete')
+    if (del) {
+      del.addEventListener('click', () => {
+        if (confirm(`Delete “${existing.name}”? Logged doses stay in the history.`)) {
+          deleteMedication(existing.id)
+          navigate('#/meds')
+        }
+      })
+    }
+  }
+
+  return { html, mount }
+}
+
+// ===========================================================================
+// INSIGHTS
 // ===========================================================================
 export function InsightsView() {
   const episodes = getEpisodes()
+  const meds = getMedications()
 
-  if (!episodes.length) {
+  if (!episodes.length && !meds.length) {
     return { html: `<main><div class="empty"><div class="big">📊</div><p>Patterns will show up here once a few episodes are logged.</p></div></main>`, mount() {} }
   }
 
-  // Last 30 days count.
   const now = Date.now()
   const last30 = episodes.filter((e) => now - new Date(e.occurredAt).getTime() <= 30 * 864e5).length
-
-  // Average duration (of those with a duration).
   const withDur = episodes.filter((e) => e.durationSeconds != null)
   const avgDur = withDur.length ? Math.round(withDur.reduce((s, e) => s + Number(e.durationSeconds), 0) / withDur.length) : null
 
-  // Frequency tallies.
   const tally = (key) => {
     const counts = {}
     episodes.forEach((e) => (e[key] || []).forEach((v) => { counts[v] = (counts[v] || 0) + 1 }))
@@ -306,19 +531,118 @@ export function InsightsView() {
       </div>`).join('')
   }
 
+  const timeline = weeklyTimeline(episodes, meds)
+
+  const statMostRecent = episodes.length ? formatDateTime(episodes[0].occurredAt).split(',')[0] : '—'
+
   const html = `<main class="stack">
     <div class="stat-grid">
-      <div class="stat"><div class="num">${episodes.length}</div><div class="lbl">Total logged</div></div>
+      <div class="stat"><div class="num">${episodes.length}</div><div class="lbl">Total seizures</div></div>
       <div class="stat"><div class="num">${last30}</div><div class="lbl">Last 30 days</div></div>
       <div class="stat"><div class="num">${avgDur != null ? formatDuration(avgDur) : '—'}</div><div class="lbl">Avg duration</div></div>
-      <div class="stat"><div class="num">${formatDateTime(episodes[0].occurredAt).split(',')[0]}</div><div class="lbl">Most recent</div></div>
+      <div class="stat"><div class="num">${statMostRecent}</div><div class="lbl">Most recent</div></div>
     </div>
+
+    <div class="card">
+      <h2>Seizures per week vs. medication changes</h2>
+      ${timeline.svg}
+      ${timeline.legend}
+      <p class="muted" style="margin:10px 0 0; font-size:12px">Each bar is one week (last 12). Vertical lines mark when a medication was started or stopped — look for changes in the bars after a line.</p>
+    </div>
+
     <div class="card"><h2>Most common symptoms</h2>${bars(topSymptoms)}</div>
     <div class="card"><h2>Most common triggers</h2>${bars(topTriggers)}</div>
-    <p class="disclaimer">These counts are only as reliable as what's been logged. Bring the full log to a doctor for interpretation.</p>
+    <p class="disclaimer">These counts are only as reliable as what's been logged. Bring the full log to a doctor for interpretation — a pattern here is a question to ask, not an answer.</p>
   </main>`
 
   return { html, mount() {} }
+}
+
+// Builds a 12-week SVG bar chart of seizure counts with vertical markers for
+// medication start/stop dates. Returns { svg, legend }.
+function weeklyTimeline(episodes, meds) {
+  const WEEKS = 12
+  const DAY = 864e5
+  const startOfWeek = (d) => {
+    const x = new Date(d)
+    const dow = (x.getDay() + 6) % 7 // Monday = 0
+    x.setHours(0, 0, 0, 0)
+    x.setDate(x.getDate() - dow)
+    return x
+  }
+  // Parse a yyyy-mm-dd string as a local date.
+  const parseLocalDate = (v) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || '')
+    return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(v)
+  }
+
+  const thisWeek = startOfWeek(new Date())
+  const first = new Date(thisWeek)
+  first.setDate(first.getDate() - (WEEKS - 1) * 7)
+
+  const weeks = Array.from({ length: WEEKS }, (_, i) => {
+    const s = new Date(first)
+    s.setDate(s.getDate() + i * 7)
+    return { start: s, count: 0 }
+  })
+  episodes.forEach((e) => {
+    const t = new Date(e.occurredAt)
+    const idx = Math.floor((startOfWeek(t) - first) / (7 * DAY))
+    if (idx >= 0 && idx < WEEKS) weeks[idx].count++
+  })
+  const max = Math.max(1, ...weeks.map((w) => w.count))
+
+  // Chart geometry (viewBox units; scales responsively).
+  const W = 320, H = 150, padL = 6, padR = 6, padT = 12, padB = 26
+  const plotW = W - padL - padR
+  const plotH = H - padT - padB
+  const bw = plotW / WEEKS
+  const yBase = padT + plotH
+
+  const barEls = weeks.map((w, i) => {
+    const h = (w.count / max) * plotH
+    const x = padL + i * bw + bw * 0.18
+    const bwi = bw * 0.64
+    const y = yBase - h
+    const label = w.count > 0 ? `<text x="${x + bwi / 2}" y="${y - 3}" text-anchor="middle" font-size="8" fill="var(--muted)">${w.count}</text>` : ''
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bwi.toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" rx="2" fill="var(--accent)"></rect>${label}`
+  }).join('')
+
+  // X-axis: label every 3rd week start.
+  const xLabels = weeks.map((w, i) => {
+    if (i % 3 !== 0) return ''
+    const x = padL + i * bw + bw / 2
+    const lbl = w.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    return `<text x="${x.toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="8" fill="var(--muted)">${lbl}</text>`
+  }).join('')
+
+  // Medication markers (start = solid, stop = dashed). Only those in the window.
+  const palette = ['#c98b3a', '#3a86c9', '#8e5bbf', '#4a9d5b', '#c0507a']
+  const windowEnd = new Date(thisWeek)
+  windowEnd.setDate(windowEnd.getDate() + 7)
+  const markers = []
+  const legendItems = []
+  meds.forEach((m, j) => {
+    const color = palette[j % palette.length]
+    if (m.startedAt) {
+      const d = parseLocalDate(m.startedAt)
+      if (d >= first && d < windowEnd) {
+        const x = padL + ((d - first) / DAY / 7) * bw
+        markers.push(`<line x1="${x.toFixed(1)}" y1="${padT}" x2="${x.toFixed(1)}" y2="${yBase}" stroke="${color}" stroke-width="1.5"></line>`)
+      }
+      legendItems.push(`<div class="item"><span class="sw" style="background:${color}"></span>Started <strong>${esc(m.name)}</strong> · ${esc(formatDate(m.startedAt))}</div>`)
+    }
+  })
+
+  const svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Seizures per week with medication markers">
+    <line x1="${padL}" y1="${yBase}" x2="${W - padR}" y2="${yBase}" stroke="var(--border)" stroke-width="1"></line>
+    ${barEls}
+    ${markers.join('')}
+    ${xLabels}
+  </svg>`
+
+  const legend = legendItems.length ? `<div class="legend">${legendItems.join('')}</div>` : ''
+  return { svg, legend }
 }
 
 // ===========================================================================
@@ -326,10 +650,17 @@ export function InsightsView() {
 // ===========================================================================
 export function SettingsView() {
   const episodes = getEpisodes()
+  const meds = getMedications()
   const settings = getSettings()
   const driveOn = driveConfigured()
 
   const html = `<main class="stack">
+    <div class="card stack">
+      <h2>Medications</h2>
+      <p class="muted" style="margin:0; font-size:13px">${meds.length} medication${meds.length === 1 ? '' : 's'} on file. This list is what you pick from when logging a dose.</p>
+      <a class="btn btn-block" href="#/meds">Manage medications</a>
+    </div>
+
     <div class="card stack">
       <h2>Export for the doctor</h2>
       <button type="button" id="pdf" class="btn-primary btn-block">🖨️ Printable report (Save as PDF)</button>
@@ -343,7 +674,7 @@ export function SettingsView() {
 
     <div class="card stack">
       <h2>Backup &amp; restore</h2>
-      <p class="muted" style="margin:0; font-size:13px">A full backup file you can keep or move to a new phone.</p>
+      <p class="muted" style="margin:0; font-size:13px">A full backup file (seizures + medications) you can keep or move to a new phone.</p>
       <button type="button" id="backup" class="btn-block">Save backup file (JSON)</button>
       <label class="btn btn-block" for="restoreFile" style="cursor:pointer">Restore from backup…</label>
       <input type="file" id="restoreFile" accept="application/json,.json" class="hidden">
@@ -351,7 +682,7 @@ export function SettingsView() {
 
     <div class="card">
       <h2>About</h2>
-      <p class="muted" style="margin:0; font-size:13px">Seizure Tracker keeps everything on this device. ${episodes.length} episode${episodes.length === 1 ? '' : 's'} stored. Nothing is uploaded unless you export it.</p>
+      <p class="muted" style="margin:0; font-size:13px">Seizure Tracker keeps everything on this device. ${episodes.length} seizure${episodes.length === 1 ? '' : 's'} stored. Nothing is uploaded unless you export it.</p>
     </div>
   </main>`
 
@@ -359,7 +690,7 @@ export function SettingsView() {
     const status = root.querySelector('#exportStatus')
     const setStatus = (msg, isError) => { status.textContent = msg; status.style.color = isError ? 'var(--danger)' : 'var(--muted)' }
 
-    root.querySelector('#pdf').addEventListener('click', () => printReport(getEpisodes()))
+    root.querySelector('#pdf').addEventListener('click', () => printReport(getEpisodes(), getMedications()))
 
     root.querySelector('#csv').addEventListener('click', () => {
       downloadFile(`seizure-log-${dateStamp()}.csv`, toCSV(getEpisodes()), 'text/csv;charset=utf-8')
@@ -373,8 +704,7 @@ export function SettingsView() {
         try {
           const file = await exportToDrive(toCSV(getEpisodes()), settings.driveFileName || 'Seizure Log')
           setStatus('')
-          const open = file.webViewLink ? `\n\nOpen it now?` : ''
-          if (file.webViewLink && confirm(`Saved to Google Drive as “${file.name}”.${open}`)) {
+          if (file.webViewLink && confirm(`Saved to Google Drive as “${file.name}”.\n\nOpen it now?`)) {
             window.open(file.webViewLink, '_blank')
           } else {
             alert(`Saved to Google Drive as “${file.name}”.`)
