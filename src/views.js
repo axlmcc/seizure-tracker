@@ -15,6 +15,7 @@ import {
 } from './store.js'
 import { toCSV, downloadFile, printReport, dateStamp } from './export.js'
 import { isConfigured as driveConfigured, exportToDrive } from './google.js'
+import { searchMedications } from './medsearch.js'
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 const tick = '<svg class="tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'
@@ -429,11 +430,16 @@ export function MedFormView(id) {
     <div class="card stack">
       <div>
         <label class="field" for="name">Medication name</label>
-        <input type="text" id="name" value="${esc(draft.name)}" placeholder="e.g. Lamotrigine" autocomplete="off">
+        <div class="autocomplete">
+          <input type="text" id="name" value="${esc(draft.name)}" placeholder="Start typing…" autocomplete="off">
+          <div id="nameSuggest" class="suggestions hidden"></div>
+        </div>
+        <p class="muted" style="margin:6px 0 0; font-size:13px">Suggestions come from the U.S. National Library of Medicine — pick one, or just type it in.</p>
       </div>
       <div>
         <label class="field" for="mdose">Dose</label>
-        <input type="text" id="mdose" value="${esc(draft.dose)}" placeholder="e.g. 50 mg">
+        <input type="text" id="mdose" list="doseOptions" value="${esc(draft.dose)}" placeholder="e.g. 50 mg">
+        <datalist id="doseOptions"></datalist>
       </div>
       <div>
         <label class="field" for="frequency">How often</label>
@@ -464,11 +470,55 @@ export function MedFormView(id) {
 
   function mount(root, navigate) {
     const bind = (sel, key) => root.querySelector(sel).addEventListener('input', (e) => { draft[key] = e.target.value })
-    bind('#name', 'name')
     bind('#mdose', 'dose')
     bind('#frequency', 'frequency')
     bind('#startedAt', 'startedAt')
     bind('#mnotes', 'notes')
+
+    // Medication-name autocomplete (debounced; cancels in-flight requests).
+    const nameInput = root.querySelector('#name')
+    const box = root.querySelector('#nameSuggest')
+    const doseOptions = root.querySelector('#doseOptions')
+    let timer = null
+    let controller = null
+    const hide = () => { box.classList.add('hidden'); box.innerHTML = ''; box._items = null }
+    const show = (items) => {
+      if (!items.length) { hide(); return }
+      box._items = items
+      box.innerHTML = items.map((it, i) =>
+        `<button type="button" data-i="${i}"><span class="s-name">${esc(it.name)}</span>${it.strengths.length ? `<span class="s-sub">${esc(it.strengths.slice(0, 4).join(' · '))}</span>` : ''}</button>`
+      ).join('')
+      box.classList.remove('hidden')
+    }
+    nameInput.addEventListener('input', () => {
+      draft.name = nameInput.value
+      const q = nameInput.value.trim()
+      clearTimeout(timer)
+      if (controller) controller.abort()
+      if (q.length < 2) { hide(); return }
+      timer = setTimeout(async () => {
+        controller = new AbortController()
+        try {
+          const items = await searchMedications(q, { signal: controller.signal })
+          if (nameInput.value.trim() === q) show(items) // ignore stale responses
+        } catch (err) {
+          if (err.name !== 'AbortError') hide() // fail quietly — manual entry still works
+        }
+      }, 250)
+    })
+    box.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-i]')
+      if (!btn || !box._items) return
+      const it = box._items[Number(btn.dataset.i)]
+      nameInput.value = it.name
+      draft.name = it.name
+      // Offer the medication's strengths as dose suggestions.
+      doseOptions.innerHTML = it.strengths.map((s) => `<option value="${esc(s)}"></option>`).join('')
+      hide()
+      root.querySelector('#mdose').focus()
+    })
+    nameInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide() })
+    nameInput.addEventListener('blur', () => setTimeout(hide, 150)) // allow click to register
 
     const active = root.querySelector('#active')
     active.addEventListener('change', () => {
