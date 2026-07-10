@@ -547,7 +547,7 @@ export function InsightsView() {
       <h2>Seizures per week vs. medication changes</h2>
       ${timeline.svg}
       ${timeline.legend}
-      <p class="muted" style="margin:10px 0 0; font-size:12px">Each bar is one week (last 12). Vertical lines mark when a medication was started or stopped — look for changes in the bars after a line.</p>
+      <p class="muted" style="margin:10px 0 0; font-size:12px">Each bar is one week (last 12). Numbered lines mark when a medication was started — match the number to the list below and look for a change in the bars afterwards.</p>
     </div>
 
     <div class="card"><h2>Most common symptoms</h2>${bars(topSymptoms)}</div>
@@ -558,11 +558,14 @@ export function InsightsView() {
   return { html, mount() {} }
 }
 
-// Builds a 12-week SVG bar chart of seizure counts with vertical markers for
-// medication start/stop dates. Returns { svg, legend }.
+// Builds a 12-week SVG bar chart of seizure counts with numbered vertical
+// markers for medications *started within the window* (older meds are
+// summarised as a footnote so the chart stays readable even with a long
+// regimen). Returns { svg, legend }.
 function weeklyTimeline(episodes, meds) {
   const WEEKS = 12
   const DAY = 864e5
+  const MARKER = '#d98a2b' // one contrasting colour; the numbers disambiguate
   const startOfWeek = (d) => {
     const x = new Date(d)
     const dow = (x.getDay() + 6) % 7 // Monday = 0
@@ -579,6 +582,8 @@ function weeklyTimeline(episodes, meds) {
   const thisWeek = startOfWeek(new Date())
   const first = new Date(thisWeek)
   first.setDate(first.getDate() - (WEEKS - 1) * 7)
+  const windowEnd = new Date(thisWeek)
+  windowEnd.setDate(windowEnd.getDate() + 7)
 
   const weeks = Array.from({ length: WEEKS }, (_, i) => {
     const s = new Date(first)
@@ -592,8 +597,9 @@ function weeklyTimeline(episodes, meds) {
   })
   const max = Math.max(1, ...weeks.map((w) => w.count))
 
-  // Chart geometry (viewBox units; scales responsively).
-  const W = 320, H = 150, padL = 6, padR = 6, padT = 12, padB = 26
+  // Chart geometry (viewBox units; scales responsively). Extra top padding
+  // leaves room for two staggered rows of marker numbers.
+  const W = 320, H = 156, padL = 6, padR = 6, padT = 30, padB = 26
   const plotW = W - padL - padR
   const plotH = H - padT - padB
   const bw = plotW / WEEKS
@@ -616,32 +622,48 @@ function weeklyTimeline(episodes, meds) {
     return `<text x="${x.toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="8" fill="var(--muted)">${lbl}</text>`
   }).join('')
 
-  // Medication markers (start = solid, stop = dashed). Only those in the window.
-  const palette = ['#c98b3a', '#3a86c9', '#8e5bbf', '#4a9d5b', '#c0507a']
-  const windowEnd = new Date(thisWeek)
-  windowEnd.setDate(windowEnd.getDate() + 7)
-  const markers = []
-  const legendItems = []
-  meds.forEach((m, j) => {
-    const color = palette[j % palette.length]
-    if (m.startedAt) {
-      const d = parseLocalDate(m.startedAt)
-      if (d >= first && d < windowEnd) {
-        const x = padL + ((d - first) / DAY / 7) * bw
-        markers.push(`<line x1="${x.toFixed(1)}" y1="${padT}" x2="${x.toFixed(1)}" y2="${yBase}" stroke="${color}" stroke-width="1.5"></line>`)
-      }
-      legendItems.push(`<div class="item"><span class="sw" style="background:${color}"></span>Started <strong>${esc(m.name)}</strong> · ${esc(formatDate(m.startedAt))}</div>`)
-    }
+  // Split medications into "started in this window" (get numbered markers) and
+  // "started earlier" (summarised as a footnote).
+  const started = []
+  let earlier = 0
+  meds.forEach((m) => {
+    if (!m.startedAt) return
+    const d = parseLocalDate(m.startedAt)
+    if (isNaN(d)) return
+    if (d >= first && d < windowEnd) started.push({ m, d })
+    else if (d < first) earlier++
   })
+  started.sort((a, b) => a.d - b.d)
 
-  const svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Seizures per week with medication markers">
+  // Draw numbered markers; stagger labels into two rows when they crowd.
+  let prevX = -Infinity
+  let lane = 0
+  const markers = started.map(({ d }, i) => {
+    const x = padL + ((d - first) / DAY / 7) * bw
+    lane = x - prevX < 16 ? (lane + 1) % 2 : 0
+    prevX = x
+    const labelY = 12 + lane * 12
+    return `<line x1="${x.toFixed(1)}" y1="${labelY + 4}" x2="${x.toFixed(1)}" y2="${yBase}" stroke="${MARKER}" stroke-width="1.3" opacity="0.85"></line>
+      <text x="${x.toFixed(1)}" y="${labelY}" text-anchor="middle" font-size="9" font-weight="700" fill="${MARKER}">${i + 1}</text>`
+  }).join('')
+
+  const svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Seizures per week with numbered medication-start markers">
     <line x1="${padL}" y1="${yBase}" x2="${W - padR}" y2="${yBase}" stroke="var(--border)" stroke-width="1"></line>
     ${barEls}
-    ${markers.join('')}
+    ${markers}
     ${xLabels}
   </svg>`
 
-  const legend = legendItems.length ? `<div class="legend">${legendItems.join('')}</div>` : ''
+  const legendItems = started.map(({ m }, i) =>
+    `<div class="item"><span class="num" style="background:${MARKER}">${i + 1}</span>Started <strong>${esc(m.name)}</strong> · ${esc(formatDate(m.startedAt))}</div>`
+  )
+  const footnote = earlier
+    ? `<div class="item muted-note">＋ ${earlier} other medication${earlier === 1 ? '' : 's'} started before this window (see the medication list).</div>`
+    : ''
+  const legend = legendItems.length || footnote
+    ? `<div class="legend">${legendItems.join('')}${footnote}</div>`
+    : `<p class="muted" style="margin:8px 0 0; font-size:13px">No medications were started in the last 12 weeks.</p>`
+
   return { svg, legend }
 }
 

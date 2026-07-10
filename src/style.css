@@ -146,6 +146,12 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .legend .item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .legend .item strong { color: var(--text); }
 .legend .sw { width: 12px; height: 12px; border-radius: 3px; flex: 0 0 auto; }
+.legend .num {
+  width: 18px; height: 18px; border-radius: 50%; flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 11px; font-weight: 700;
+}
+.legend .muted-note { font-style: italic; opacity: 0.85; }
 
 /* ---- Stats ---- */
 .stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
