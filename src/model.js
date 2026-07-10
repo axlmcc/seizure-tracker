@@ -177,9 +177,25 @@ export function createMedication(overrides = {}) {
     frequency: '', // free text, with MED_FREQUENCIES as suggestions
     startedAt: todayLocalDate(), // date this med was started — key for correlation
     active: true, // false = stopped taking it (kept for history)
+    batchIds: [], // which time-of-day batches this med belongs to
     notes: '',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    ...overrides,
+  }
+}
+
+// A time-of-day group of medications (e.g. "Morning"). Seeded with defaults but
+// fully editable.
+export const DEFAULT_BATCH_NAMES = ['Morning', 'Midday', 'Evening']
+
+export function createBatch(overrides = {}) {
+  return {
+    id: newId(),
+    name: '',
+    order: 0,
+    createdAt: new Date().toISOString(),
+    ...overrides,
   }
 }
 
@@ -193,6 +209,9 @@ export function createMedEvent(overrides = {}) {
     dose: '',
     takenAt: nowLocalInput(),
     skipped: false, // true = a missed / skipped dose
+    batchId: '', // set when logged as part of a batch
+    batchName: '', // snapshot for display
+    groupId: '', // shared by all doses logged together in one batch action
     notes: '',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

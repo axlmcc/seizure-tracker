@@ -13,7 +13,7 @@
 // Requires VITE_GOOGLE_CLIENT_ID to be set (see .env.example). If it isn't,
 // isConfigured() returns false and the UI hides/disables the Drive button.
 
-import { getSettings, updateSettings } from './store.js'
+import { getSettings, updateSettings } from './store.svelte.js'
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
 const SCOPE = 'https://www.googleapis.com/auth/drive.file'

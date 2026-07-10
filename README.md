@@ -26,9 +26,12 @@ focal-aware-impaired seizures, but every list has an "Other symptoms" box so not
 is off-limits.
 
 **Medications** — keep a regimen list (name, dose, frequency, start date,
-active/stopped) in Settings, then log each dose taken or skipped as its own event. The
-Log tab shows a single, time-sorted timeline of seizures and medication events
-together.
+active/stopped) in Settings, with **name autocomplete** powered by the U.S. National
+Library of Medicine (RxTerms). Group medications into **batches** (e.g. Morning / Midday
+/ Evening) so a whole time-of-day can be logged in one action — each medication marked
+taken, or tapped to mark skipped. Single ad-hoc doses can also be logged. The Log tab
+shows a single, time-sorted timeline of seizures and medication events, with batch doses
+collapsed into one entry.
 
 **Insights** — summary stats plus a 12-week "seizures per week" bar chart with vertical
 markers for when each medication was started, to help eyeball whether seizure frequency
@@ -87,13 +90,17 @@ The first export creates a Google Sheet; later exports update that same sheet.
 - Data lives in this browser only. Clearing site data / uninstalling removes it.
 - Use **Settings → Save backup file** to keep a JSON backup or move data to a new phone
   (**Restore from backup** merges it back in).
-- No analytics, no accounts, no third-party calls except the Google Drive export you
-  trigger yourself.
+- No analytics and no accounts. The only outbound calls are ones you trigger: the Google
+  Drive export, and medication-name autocomplete (the text typed into the name field is
+  sent to the NLM lookup service — nothing else).
 
 ## Tech
 
-Vanilla JavaScript + [Vite](https://vitejs.dev/). No UI framework. A tiny hash router,
-a `localStorage`-backed store, and a service worker for offline use.
+[Svelte 5](https://svelte.dev/) + [Vite](https://vitejs.dev/). A deeply-reactive
+`localStorage`-backed store (`store.svelte.js`) is the single source of truth across the
+app; a small hash router in `App.svelte` swaps screens; a service worker provides offline
+use. Framework-agnostic logic (data model, CSV/PDF export, Google Drive, medication
+search) lives in plain `.js` modules.
 
 ## License
 
